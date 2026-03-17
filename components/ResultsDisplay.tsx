@@ -139,14 +139,14 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ calculation, inp
             <MetricBox title="Strike" value={option.strike} suffix="" colorClass="text-slate-100" />
             <MetricBox 
               title="Bid / Ask" 
-              value={option.bid !== null && option.ask !== null ? `${option.bid} / ${option.ask}` : null} 
+              value={option.bid !== null && option.ask !== null ? `${option.bid.toFixed(3)} / ${option.ask.toFixed(3)}` : null} 
               colorClass="text-indigo-300" 
             />
-            <MetricBox title="Last Price" value={option.last} colorClass="text-slate-400" />
+            <MetricBox title="Last Price" value={option.last?.toFixed(3) || null} colorClass="text-slate-400" />
             <MetricBox title="Volume" value={option.vol} colorClass="text-blue-400" />
             <MetricBox title="Open Int." value={option.oi} colorClass="text-purple-400" />
-            <MetricBox title="Delta" value={option.delta} colorClass="text-amber-400" />
-            <MetricBox title="Theta" value={option.theta} colorClass="text-orange-400" />
+            <MetricBox title="Delta" value={option.delta?.toFixed(3) || null} colorClass="text-amber-400" />
+            <MetricBox title="Theta" value={option.theta?.toFixed(3) || null} colorClass="text-orange-400" />
             <MetricBox title="DTE" value={calculation.dte} suffix="d" colorClass="text-emerald-400" />
          </div>
       </div>

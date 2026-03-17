@@ -1,4 +1,6 @@
+
 export interface OptionContract {
+  ticker: string;
   strike: number;
   bid: number | null;
   ask: number | null;
