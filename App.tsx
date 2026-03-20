@@ -5,8 +5,10 @@ import { DEFAULT_TARGET_APY, DEFAULT_TARGET_DISCOUNT, DEFAULT_TICKER } from './c
 import { marketService } from './services/marketDataService';
 import { InputPanel } from './components/InputPanel';
 import { ResultsDisplay } from './components/ResultsDisplay';
-import { ExpirationSelector } from './components/ExpirationSelector';
+import { OptionsTable } from './components/OptionsTable';
 import { GeminiInsight } from './components/GeminiInsight';
+import { TutorialModal } from './components/TutorialModal';
+import { HelpCircle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [marketData, setMarketData] = useState<MarketData | null>(null);
@@ -16,8 +18,8 @@ const App: React.FC = () => {
   const [fetchingQuote, setFetchingQuote] = useState(false);
   const [activeQuote, setActiveQuote] = useState<Partial<OptionContract> | null>(null);
   const [lastTickTime, setLastTickTime] = useState(0);
-  const [isSim, setIsSim] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const [inputs, setInputs] = useState<TradeInputs>({
     ticker: DEFAULT_TICKER,
@@ -29,6 +31,20 @@ const App: React.FC = () => {
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   const [backendStatus, setBackendStatus] = useState<{ hasApiKey: boolean; status: string } | null>(null);
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  // Check for first-time user
+  useEffect(() => {
+    const hasSeenTutorial = localStorage.getItem('hasSeenTutorial');
+    if (!hasSeenTutorial) {
+      setShowTutorial(true);
+    }
+  }, []);
+
+  const handleTutorialClose = () => {
+    setShowTutorial(false);
+    localStorage.setItem('hasSeenTutorial', 'true');
+  };
 
   useEffect(() => {
     fetch('/api/status')
@@ -58,14 +74,21 @@ const App: React.FC = () => {
     setMarketData(null); 
     setErrorMsg(null);
     setActiveQuote(null);
+    setIsSyncing(true);
 
-    const unsubscribe = marketService.subscribe(inputs.ticker, (data) => {
-      setMarketData(data);
-      setLastTickTime(Date.now());
-      setIsSim(marketService.getIsSimulated());
-    });
+    let unsubscribe: (() => void) | null = null;
+    const timer = setTimeout(() => {
+      unsubscribe = marketService.subscribe(inputs.ticker, (data) => {
+        setMarketData(data);
+        setLastTickTime(Date.now());
+        setIsSyncing(false);
+      });
+    }, 600);
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(timer);
+      if (unsubscribe) unsubscribe();
+    };
   }, [inputs.ticker]);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -85,6 +108,8 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
+    let timer: NodeJS.Timeout | null = null;
+
     const updateQuote = async () => {
       if (!marketData || !inputs.selectedDate) return;
       
@@ -109,9 +134,57 @@ const App: React.FC = () => {
       }
     };
 
-    updateQuote();
-    return () => { isMounted = false; };
+    // Debounce the quote update to prevent API spam from slider moves
+    timer = setTimeout(() => {
+      updateQuote();
+    }, 400);
+
+    return () => { 
+      isMounted = false; 
+      if (timer) clearTimeout(timer);
+    };
   }, [marketData, inputs.selectedDate, inputs.targetDiscount]);
+
+  const allCalculations: TradeCalculation[] = useMemo(() => {
+    if (!marketData) return [];
+    
+    const currentPrice = marketData.currentPrice;
+    const targetStrike = currentPrice * (1 - inputs.targetDiscount / 100);
+    
+    return marketData.chain.map(exp => {
+      if (!exp.strikes || exp.strikes.length === 0) return null;
+      
+      const closestOption = exp.strikes.reduce((prev, curr) => {
+        return (Math.abs(curr.strike - targetStrike) < Math.abs(prev.strike - targetStrike) ? curr : prev);
+      });
+      
+      const dte = exp.daysToExpiration;
+      if (dte === 0) return null;
+
+      const strike = closestOption.strike;
+      const collateral = strike * 100;
+      const requiredTotalCredit = collateral * (inputs.targetAPY / 100) * (dte / 365);
+      
+      const actualPremiumPerShare = closestOption.bid || closestOption.last || 0;
+      const actualTotalCredit = actualPremiumPerShare * 100;
+      const actualAPY = collateral > 0 ? (actualTotalCredit / collateral) * (365 / dte) * 100 : 0;
+      const netPurchasePrice = strike - actualPremiumPerShare;
+
+      return {
+        date: exp.date,
+        calculatedStrike: strike,
+        collateral,
+        dte,
+        requiredTotalCredit,
+        actualTotalCredit,
+        actualAPY,
+        netPurchasePrice,
+        isTargetMet: actualTotalCredit >= requiredTotalCredit && actualTotalCredit > 0,
+        actualPremiumPerShare,
+        option: closestOption
+      };
+    }).filter((c): c is TradeCalculation => c !== null);
+  }, [marketData, inputs.targetAPY, inputs.targetDiscount]);
 
   const calculation: TradeCalculation | null = useMemo(() => {
     if (!marketData || !inputs.selectedDate) return null;
@@ -120,13 +193,15 @@ const App: React.FC = () => {
     const targetStrike = currentPrice * (1 - inputs.targetDiscount / 100);
     const expirationData = marketData.chain.find(exp => exp.date === inputs.selectedDate);
     
-    if (!expirationData || expirationData.strikes.length === 0) return null;
+    if (!expirationData || !expirationData.strikes || expirationData.strikes.length === 0) return null;
 
     const closestOption = expirationData.strikes.reduce((prev, curr) => {
       return (Math.abs(curr.strike - targetStrike) < Math.abs(prev.strike - targetStrike) ? curr : prev);
     });
 
     const dte = expirationData.daysToExpiration;
+    if (dte === 0) return null;
+
     const strike = closestOption.strike;
     const collateral = strike * 100;
     const requiredTotalCredit = collateral * (inputs.targetAPY / 100) * (dte / 365);
@@ -144,6 +219,7 @@ const App: React.FC = () => {
     const netPurchasePrice = strike - actualPremiumPerShare;
 
     return {
+      date: expirationData.date,
       calculatedStrike: strike,
       collateral,
       dte,
@@ -168,6 +244,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 pb-80 selection:bg-indigo-500/30">
+      {showTutorial && <TutorialModal onClose={handleTutorialClose} />}
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 backdrop-blur-xl bg-opacity-90">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -180,6 +257,15 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center space-x-4">
+            <button 
+              onClick={() => setShowTutorial(true)}
+              className="p-2 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+              title="Show Tutorial"
+            >
+              <HelpCircle className="w-4 h-4" />
+              <span className="hidden sm:inline">Help</span>
+            </button>
+            <div className="h-4 w-[1px] bg-slate-800"></div>
             {backendStatus && !backendStatus.hasApiKey && (
               <div className="px-3 py-1 bg-red-950/30 border border-red-900/50 rounded-lg text-[10px] font-bold text-red-400 uppercase tracking-tighter animate-pulse">
                 MISSING MARKETDATA_API_KEY
@@ -188,10 +274,10 @@ const App: React.FC = () => {
             <button 
               onClick={handleReconnect}
               title="Retry MarketData.app Sync"
-              className={`flex items-center px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest border transition-all hover:scale-105 active:scale-95 ${reconnecting ? 'bg-indigo-600 text-white border-indigo-500' : (isSim ? 'bg-amber-950/20 text-amber-500 border-amber-900/50' : 'bg-emerald-950/20 text-emerald-400 border-emerald-900/50')}`}
+              className={`flex items-center px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest border transition-all hover:scale-105 active:scale-95 ${reconnecting ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-emerald-950/20 text-emerald-400 border-emerald-900/50'}`}
             >
-               <span className={`w-2 h-2 rounded-full mr-2 ${reconnecting ? 'bg-white animate-ping' : (isSim ? 'bg-amber-500' : 'bg-emerald-400 animate-pulse')}`}></span>
-               {reconnecting ? 'RECONNECTING...' : (isSim ? 'FEED: SIMULATED' : 'FEED: LIVE')}
+               <span className={`w-2 h-2 rounded-full mr-2 ${reconnecting ? 'bg-white animate-ping' : 'bg-emerald-400 animate-pulse'}`}></span>
+               {reconnecting ? 'RECONNECTING...' : 'FEED: LIVE'}
             </button>
 
             <button 
@@ -212,8 +298,8 @@ const App: React.FC = () => {
               <span className="h-6 w-px bg-slate-800"></span>
               <div className="flex flex-col items-start min-w-[80px]">
                 <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Price</span>
-                <span className={`font-mono font-bold text-sm leading-none transition-all duration-200 ${!marketData ? 'animate-pulse text-slate-600' : (pulse ? 'text-indigo-400' : 'text-slate-100')}`}>
-                  {marketData ? `$${marketData.currentPrice.toFixed(2)}` : 'SCANNING...'}
+                <span className={`font-mono font-bold text-sm leading-none transition-all duration-200 ${isSyncing ? 'animate-pulse text-slate-600' : (pulse ? 'text-indigo-400' : 'text-slate-100')}`}>
+                  {marketData && marketData.currentPrice > 0 ? `$${marketData.currentPrice.toFixed(2)}` : (isSyncing ? 'SYNCING...' : '---')}
                 </span>
               </div>
               <button 
@@ -237,29 +323,68 @@ const App: React.FC = () => {
           <p className="text-slate-500 leading-relaxed text-lg">
             Verify your CSP yield with real-time data and institutional-grade trade math. Powered by MarketData.app for the precision every CSP trader needs.
           </p>
-          {isSim && (
-            <div className="mt-6 p-4 bg-amber-950/20 border border-amber-900/50 rounded-2xl flex items-center gap-4">
-              <span className="text-amber-500 text-xl font-bold italic">SIM</span>
-              <p className="text-amber-400 text-sm font-bold uppercase tracking-wide">
-                Network Restricted: Feed is currently in High-Fidelity Simulation. 
-                <button onClick={handleReconnect} className="ml-3 underline hover:text-white transition-colors">Try Reconnect</button>
-              </p>
-            </div>
-          )}
         </div>
 
         <InputPanel inputs={inputs} setInputs={setInputs} />
 
+        {isSyncing && !marketData && (
+          <div className="bg-slate-900/30 p-20 rounded-3xl border border-slate-800/40 backdrop-blur-sm flex flex-col items-center justify-center space-y-4">
+            <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+            <p className="text-slate-500 font-black uppercase tracking-widest text-xs">Synchronizing with MarketData.app...</p>
+          </div>
+        )}
+
+        {!isSyncing && !marketData && (
+          <div className="bg-slate-900/30 p-20 rounded-3xl border border-slate-800/40 backdrop-blur-sm flex flex-col items-center justify-center space-y-6 text-center">
+            <div className="w-16 h-16 bg-red-950/20 rounded-full flex items-center justify-center text-red-500">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-black text-white uppercase tracking-tighter">Connection Failed</h3>
+              <p className="text-slate-500 max-w-md mx-auto">
+                {errorMsg || "We couldn't retrieve market data for this ticker. Please verify your API key and ticker symbol."}
+              </p>
+            </div>
+            {backendStatus && !backendStatus.hasApiKey && (
+              <div className="p-4 bg-indigo-950/20 border border-indigo-900/50 rounded-2xl max-w-md">
+                <p className="text-indigo-400 text-xs font-bold uppercase tracking-wide mb-3">
+                  API Key Required for Live Data
+                </p>
+                <p className="text-slate-400 text-[10px] leading-relaxed mb-4">
+                  To get real-time options data, you must add your MarketData.app API key to the project secrets.
+                </p>
+                <div className="text-left text-[10px] space-y-1 text-slate-500 font-mono bg-slate-950 p-3 rounded-lg">
+                  <div>1. Open Settings (⚙️ gear icon)</div>
+                  <div>2. Select Secrets</div>
+                  <div>3. Key: MARKETDATA_API_KEY</div>
+                  <div>4. Value: [Your API Key]</div>
+                </div>
+              </div>
+            )}
+            <button 
+              onClick={handleReconnect}
+              className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20"
+            >
+              Retry Connection
+            </button>
+          </div>
+        )}
+
         {marketData && (
           <div className="bg-slate-900/30 p-8 rounded-3xl border border-slate-800/40 backdrop-blur-sm">
-             <ExpirationSelector 
-               chain={marketData.chain} 
-               selectedDate={inputs.selectedDate} 
+             <OptionsTable 
+               marketData={marketData} 
+               inputs={inputs} 
                onSelect={(date) => setInputs(prev => ({ ...prev, selectedDate: date }))}
              />
              
              <div className={fetchingQuote ? 'opacity-40 grayscale blur-[1px] transition-all duration-300' : 'transition-all duration-300'}>
-               <ResultsDisplay calculation={calculation} inputs={inputs} />
+               <ResultsDisplay 
+                  calculation={calculation} 
+                  inputs={inputs} 
+                />
              </div>
 
              {calculation && marketData && !fetchingQuote && (
@@ -285,7 +410,7 @@ const App: React.FC = () => {
           onClick={() => setShowLogs(!showLogs)}
         >
            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-3">
-             <span className={`w-2 h-2 rounded-full ${isSim ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'}`}></span>
+             <span className={`w-2 h-2 rounded-full bg-emerald-500 animate-pulse`}></span>
              MarketData.app Engine Traffic
            </h3>
            <span className="text-slate-600 text-[10px] font-black uppercase tracking-widest">{showLogs ? 'Hide Activity' : 'Show Activity'}</span>

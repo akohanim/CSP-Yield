@@ -61,9 +61,11 @@ export class MarketDataService {
     }
     this.subscribers.get(upperTicker)?.add(callback);
     
-    if (this.currentTicker !== upperTicker) {
+    // Always trigger a fetch if we don't have data for this ticker yet
+    if (this.currentTicker !== upperTicker || !this.lastMarketData || this.lastMarketData.ticker !== upperTicker) {
       this.currentTicker = upperTicker;
-      this.fetchInitialMetadata();
+      this.lastMarketData = null; // Reset to show loading state
+      this.fetchInitialMetadata(upperTicker);
       this.startPolling();
     } else if (this.lastMarketData) {
        callback(this.lastMarketData);
@@ -80,8 +82,9 @@ export class MarketDataService {
   }
 
   public async reconnect() {
-    this.log("Manually re-triggering MarketData.app synchronization...");
-    await this.fetchInitialMetadata();
+    if (!this.currentTicker) return;
+    this.log(`Manually re-triggering MarketData.app synchronization for ${this.currentTicker}...`);
+    await this.fetchInitialMetadata(this.currentTicker);
   }
 
   public async refresh() {
@@ -90,7 +93,7 @@ export class MarketDataService {
     if (this.isSimulated) {
       this.simulatePriceTick();
     } else {
-      await this.fetchLatestPrice();
+      await this.fetchLatestPrice(this.currentTicker);
     }
   }
 
@@ -110,167 +113,267 @@ export class MarketDataService {
     if (!this.lastMarketData) return;
     const volatility = 0.0005;
     const change = this.lastMarketData.currentPrice * (Math.random() - 0.5) * volatility;
-    this.updatePrice(this.lastMarketData.currentPrice + change);
+    this.updatePrice(this.lastMarketData.ticker, this.lastMarketData.currentPrice + change);
   }
 
-  private async fetchLatestPrice() {
-    if (!this.currentTicker || this.isSimulated) return;
+  private async fetchLatestPrice(ticker: string) {
+    if (this.isSimulated) return;
     try {
-      const url = `${MARKETDATA_API_BASE}/stocks/quotes/${this.currentTicker}/`;
+      const url = `${MARKETDATA_API_BASE}/stocks/quotes/${ticker}/`;
       const data = await this.proxyFetch(url);
       
-      if (data && data.s === 'ok' && data.last && data.last.length > 0) {
-        this.updatePrice(data.last[0]);
+      if (data && data.s === 'ok' && data.last && Array.isArray(data.last) && data.last.length > 0) {
+        this.updatePrice(ticker, data.last[0]);
       }
     } catch (e) {
       // Quietly handle transient poll errors
     }
   }
 
-  private updatePrice(newPrice: number) {
-    if (this.lastMarketData) {
+  private updatePrice(ticker: string, newPrice: number) {
+    if (this.lastMarketData && this.lastMarketData.ticker === ticker) {
       this.lastMarketData = {
         ...this.lastMarketData,
         currentPrice: newPrice,
         lastUpdated: Date.now()
       };
-      this.subscribers.get(this.currentTicker!)?.forEach(cb => cb(this.lastMarketData!));
+      this.subscribers.get(ticker)?.forEach(cb => cb(this.lastMarketData!));
     }
   }
 
-  private async fetchInitialMetadata() {
-    if (!this.currentTicker) return;
-    
+  private async fetchInitialMetadata(ticker: string) {
     try {
       // 1. Fetch Stock Quote
-      const priceUrl = `${MARKETDATA_API_BASE}/stocks/quotes/${this.currentTicker}/`;
+      const priceUrl = `${MARKETDATA_API_BASE}/stocks/quotes/${ticker}/`;
       const priceData = await this.proxyFetch(priceUrl);
 
-      if (priceData && priceData.s === 'ok' && priceData.last && priceData.last.length > 0) {
+      if (priceData && priceData.s === 'ok' && priceData.last && Array.isArray(priceData.last) && priceData.last.length > 0) {
         const currentPrice = priceData.last[0];
+        
+        // Check if we are still interested in this ticker
+        if (ticker !== this.currentTicker) return;
+
         this.isSimulated = false;
         
         // 2. Fetch Option Chain
-        await this.fetchAndProcessChain(currentPrice);
+        await this.fetchAndProcessChain(ticker, currentPrice);
         
-        this.log(`Handshake complete. Live MarketData.app feed active for ${this.currentTicker}.`);
+        if (ticker === this.currentTicker) {
+          this.log(`Handshake complete. Live MarketData.app feed active for ${ticker}.`);
+        }
       } else {
-        throw new Error("Empty response from data source.");
+        const errorMsg = priceData?.errmsg || priceData?.error || "Empty response from data source.";
+        throw new Error(errorMsg);
       }
     } catch (e: any) {
-      this.log(`Backend Sync Failed: ${e.message}. Activating Institutional Simulation Mode.`);
-      this.isSimulated = true;
-      const fallbackPrices: Record<string, number> = {
-        'SPY': 512.30, 'QQQ': 440.15, 'IWM': 205.50, 'TSLA': 172.80, 
-        'AAPL': 185.20, 'AMD': 160.40, 'NVDA': 890.10, 'RIVN': 11.20
-      };
-      this.generateSimulatedChain(fallbackPrices[this.currentTicker] || 150.00);
+      if (ticker !== this.currentTicker) return;
+      
+      this.log(`Backend Sync Failed for ${ticker}: ${e.message}.`);
+      this.isSimulated = false;
+      this.lastMarketData = null;
+      this.subscribers.get(ticker)?.forEach(cb => cb({
+        ticker: ticker,
+        currentPrice: 0,
+        lastUpdated: Date.now(),
+        chain: []
+      }));
     }
   }
 
-  private async fetchAndProcessChain(currentPrice: number) {
+  private async fetchAndProcessChain(ticker: string, currentPrice: number) {
     try {
-      // Fetch put options only for the next 60 days to keep it manageable
-      const chainUrl = `${MARKETDATA_API_BASE}/options/chain/${this.currentTicker}/?side=put`;
-      const data = await this.proxyFetch(chainUrl);
+      this.log(`Fetching optimized bulk options chain for ${ticker}...`);
+      const response = await fetch(`/api/bulk-options?ticker=${ticker}`);
+      
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Status ${response.status}`);
+      }
 
-      if (data && data.s === 'ok' && data.strike) {
-        const expirationsMap: Map<string, OptionContract[]> = new Map();
+      const data = await response.json();
+      
+      if (data && data.s === 'ok' && data.expirations) {
+        const expirationsMap = data.expirations;
         
-        for (let i = 0; i < data.strike.length; i++) {
-          const expTimestamp = data.expiration[i] * 1000;
-          const expDate = new Date(expTimestamp).toISOString().split('T')[0];
-          
-          if (!expirationsMap.has(expDate)) {
-            expirationsMap.set(expDate, []);
-          }
-          
-          expirationsMap.get(expDate)?.push({
-            ticker: data.symbol[i],
-            strike: data.strike[i],
-            bid: this.roundTo(data.bid[i] || 0, 3),
-            ask: this.roundTo(data.ask[i] || 0, 3),
-            last: this.roundTo(data.last[i] || 0, 3),
-            vol: data.volume[i] || 0,
-            oi: data.openInterest[i] || 0,
-            delta: this.roundTo(data.delta ? data.delta[i] : -0.3, 3), 
-            theta: this.roundTo(data.theta ? data.theta[i] : -0.05, 3)
-          });
-        }
+        // Final check before state update
+        if (ticker !== this.currentTicker) return;
 
-        const today = new Date();
-        const chain: ExpirationDate[] = Array.from(expirationsMap.entries())
-          .map(([date, strikes]) => {
-            const expDate = new Date(date);
-            const dte = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        const now = new Date();
+        const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+
+        const chain: ExpirationDate[] = Object.entries(expirationsMap)
+          .map(([date, strikes]: [string, any]) => {
+            const expDateObj = new Date(date); // YYYY-MM-DD is parsed as UTC midnight
+            const diffTime = expDateObj.getTime() - today.getTime();
+            const dte = Math.max(0, Math.round(diffTime / (1000 * 60 * 60 * 24)));
+            
+            // Round values for the client
+            const roundedStrikes = strikes.map((s: any) => ({
+              ...s,
+              bid: this.roundTo(s.bid, 3),
+              ask: this.roundTo(s.ask, 3),
+              last: this.roundTo(s.last, 3),
+              delta: this.roundTo(s.delta, 3),
+              theta: this.roundTo(s.theta, 3)
+            }));
+
             return {
               date,
               daysToExpiration: dte,
-              strikes: strikes.sort((a, b) => b.strike - a.strike) // Sort strikes descending
+              strikes: roundedStrikes.sort((a: any, b: any) => b.strike - a.strike)
             };
           })
           .filter(exp => exp.daysToExpiration > 0)
           .sort((a, b) => a.daysToExpiration - b.daysToExpiration)
-          .slice(0, 8); // Limit to first 8 expirations
+          .slice(0, 50);
 
-        this.lastMarketData = {
-          ticker: this.currentTicker!,
+        this.log(`Successfully mapped ${chain.length} unique expiration dates for ${ticker} via optimized bulk fetch.`);
+
+        const newData: MarketData = {
+          ticker: ticker,
           currentPrice,
           lastUpdated: Date.now(),
           chain
         };
-        this.subscribers.get(this.currentTicker!)?.forEach(cb => cb(this.lastMarketData!));
+
+        this.lastMarketData = newData;
+        this.subscribers.get(ticker)?.forEach(cb => cb(this.lastMarketData!));
       } else {
-        this.generateSimulatedChain(currentPrice);
+        throw new Error("Invalid response from bulk options endpoint");
       }
-    } catch (e) {
-      this.log(`Chain Fetch Failed: ${e instanceof Error ? e.message : String(e)}. Using simulation.`);
-      this.generateSimulatedChain(currentPrice);
+    } catch (e: any) {
+      if (ticker !== this.currentTicker) return;
+      this.log(`Optimized Chain Fetch Failed for ${ticker}: ${e.message}.`);
+      
+      // Fallback to the old method if the new one fails for some reason
+      this.log(`Attempting legacy fallback fetch for ${ticker}...`);
+      await this.legacyFetchAndProcessChain(ticker, currentPrice);
     }
   }
 
-  private generateSimulatedChain(currentPrice: number) {
-    const today = new Date();
-    const chain: ExpirationDate[] = [];
-    
-    for (let i = 1; i <= 6; i++) {
-      const expDate = new Date();
-      expDate.setDate(today.getDate() + (i * 7) + (5 - today.getDay()));
-      const dateStr = expDate.toISOString().split('T')[0];
-      const dte = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  private async legacyFetchAndProcessChain(ticker: string, currentPrice: number) {
+    try {
+      this.log(`Fetching expirations list for ${ticker}...`);
+      const expUrl = `${MARKETDATA_API_BASE}/options/expirations/${ticker}/`;
+      const expData = await this.proxyFetch(expUrl);
       
-      const strikes: OptionContract[] = [];
-      const baseStrike = Math.round(currentPrice);
-      const increment = currentPrice > 300 ? 5 : (currentPrice > 100 ? 2 : 1);
-      
-      for (let s = -15; s <= 2; s++) {
-        const strikePrice = baseStrike + (s * increment);
-        strikes.push({
-          ticker: `${this.currentTicker}${expDate.getFullYear().toString().slice(-2)}${String(expDate.getMonth()+1).padStart(2,'0')}${String(expDate.getDate()).padStart(2,'0')}P${String(strikePrice * 1000).padStart(8, '0')}`,
-          strike: strikePrice,
-          bid: this.roundTo(Math.max(0.01, (currentPrice - strikePrice) * 0.05 + Math.random()), 3),
-          ask: this.roundTo(Math.max(0.05, (currentPrice - strikePrice) * 0.06 + Math.random()), 3),
-          last: this.roundTo(Math.max(0.01, (currentPrice - strikePrice) * 0.05 + Math.random()), 3),
-          vol: Math.floor(Math.random() * 200),
-          oi: Math.floor(Math.random() * 1000),
-          delta: this.roundTo(-Math.random() * 0.5, 3),
-          theta: this.roundTo(-Math.random() * 0.1, 3)
-        });
-      }
-      chain.push({ date: dateStr, daysToExpiration: dte, strikes });
-    }
+      let expirationsMap: Map<string, OptionContract[]> = new Map();
 
-    this.lastMarketData = {
-      ticker: this.currentTicker!,
-      currentPrice,
-      lastUpdated: Date.now(),
-      chain
-    };
-    this.subscribers.get(this.currentTicker!)?.forEach(cb => cb(this.lastMarketData!));
+      if (expData && expData.s === 'ok' && expData.expirations && Array.isArray(expData.expirations)) {
+        // Get up to 25 expirations to show a good range
+        const expirations = expData.expirations.slice(0, 25);
+        this.log(`Found ${expData.expirations.length} expirations for ${ticker}. Fetching chains for top ${expirations.length}...`);
+        
+        // Fetch chains in parallel batches to avoid overwhelming the proxy/API
+        const batchSize = 5;
+        for (let i = 0; i < expirations.length; i += batchSize) {
+          // Check if ticker changed mid-fetch
+          if (ticker !== this.currentTicker) return;
+
+          const batch = expirations.slice(i, i + batchSize);
+          await Promise.all(batch.map(async (expDate) => {
+            try {
+              const chainUrl = `${MARKETDATA_API_BASE}/options/chain/${ticker}/?side=put&expiration=${expDate}`;
+              const data = await this.proxyFetch(chainUrl);
+              
+              if (data && data.s === 'ok' && data.strike && Array.isArray(data.strike)) {
+                const contracts: OptionContract[] = [];
+                for (let j = 0; j < data.strike.length; j++) {
+                  contracts.push({
+                    ticker: (data.optionSymbol && data.optionSymbol[j]) || (data.symbol && data.symbol[j]) || 'UNKNOWN',
+                    strike: data.strike[j],
+                    bid: this.roundTo((data.bid && data.bid[j]) || 0, 3),
+                    ask: this.roundTo((data.ask && data.ask[j]) || 0, 3),
+                    last: this.roundTo((data.last && data.last[j]) || 0, 3),
+                    vol: (data.volume && data.volume[j]) || 0,
+                    oi: (data.openInterest && data.openInterest[j]) || 0,
+                    delta: this.roundTo((data.delta && data.delta[j]) !== undefined ? data.delta[j] : -0.3, 3), 
+                    theta: this.roundTo((data.theta && data.theta[j]) !== undefined ? data.theta[j] : -0.05, 3)
+                  });
+                }
+                expirationsMap.set(expDate, contracts);
+              }
+            } catch (e) {
+              this.log(`Skipping ${expDate} for ${ticker} due to fetch error.`);
+            }
+          }));
+        }
+      } else {
+        // Fallback to range=all if expirations list is not available
+        this.log(`Expirations list unavailable for ${ticker}. Falling back to range=all...`);
+        const chainUrl = `${MARKETDATA_API_BASE}/options/chain/${ticker}/?side=put&range=all`;
+        const data = await this.proxyFetch(chainUrl);
+
+        if (data && data.s === 'ok' && data.strike && Array.isArray(data.strike)) {
+          for (let i = 0; i < data.strike.length; i++) {
+            if (!data.expiration || data.expiration[i] === undefined) continue;
+            const expValue = data.expiration[i];
+            let expDateObj: Date;
+            if (typeof expValue === 'number') {
+              let ts = expValue;
+              if (ts < 10000000000) ts *= 1000;
+              expDateObj = new Date(ts);
+            } else {
+              expDateObj = new Date(expValue);
+            }
+            if (isNaN(expDateObj.getTime())) continue;
+            const expDate = expDateObj.toISOString().split('T')[0];
+            if (!expirationsMap.has(expDate)) expirationsMap.set(expDate, []);
+            expirationsMap.get(expDate)?.push({
+              ticker: (data.optionSymbol && data.optionSymbol[i]) || (data.symbol && data.symbol[i]) || 'UNKNOWN',
+              strike: data.strike[i],
+              bid: this.roundTo((data.bid && data.bid[i]) || 0, 3),
+              ask: this.roundTo((data.ask && data.ask[i]) || 0, 3),
+              last: this.roundTo((data.last && data.last[i]) || 0, 3),
+              vol: (data.volume && data.volume[i]) || 0,
+              oi: (data.openInterest && data.openInterest[i]) || 0,
+              delta: this.roundTo((data.delta && data.delta[i]) !== undefined ? data.delta[i] : -0.3, 3), 
+              theta: this.roundTo((data.theta && data.theta[i]) !== undefined ? data.theta[i] : -0.05, 3)
+            });
+          }
+        }
+      }
+
+      // Final check before state update
+      if (ticker !== this.currentTicker) return;
+
+      const now = new Date();
+      const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+
+      const chain: ExpirationDate[] = Array.from(expirationsMap.entries())
+        .map(([date, strikes]) => {
+          const expDateObj = new Date(date); // YYYY-MM-DD is parsed as UTC midnight
+          const diffTime = expDateObj.getTime() - today.getTime();
+          const dte = Math.max(0, Math.round(diffTime / (1000 * 60 * 60 * 24)));
+          return {
+            date,
+            daysToExpiration: dte,
+            strikes: strikes.sort((a, b) => b.strike - a.strike)
+          };
+        })
+        .filter(exp => exp.daysToExpiration > 0)
+        .sort((a, b) => a.daysToExpiration - b.daysToExpiration)
+        .slice(0, 50);
+
+      this.log(`Successfully mapped ${chain.length} unique expiration dates for ${ticker}.`);
+
+      const newData: MarketData = {
+        ticker: ticker,
+        currentPrice,
+        lastUpdated: Date.now(),
+        chain
+      };
+
+      this.lastMarketData = newData;
+      this.subscribers.get(ticker)?.forEach(cb => cb(this.lastMarketData!));
+    } catch (e: any) {
+      if (ticker !== this.currentTicker) return;
+      this.log(`Legacy Chain Fetch Failed for ${ticker}: ${e.message}.`);
+    }
   }
 
   public getIsSimulated(): boolean {
-    return this.isSimulated;
+    return false;
   }
 
   public async fetchContractQuote(ticker: string): Promise<Partial<OptionContract> | null> {
@@ -279,11 +382,11 @@ export class MarketDataService {
        try {
          const url = `${MARKETDATA_API_BASE}/options/quotes/${ticker}/`;
          const data = await this.proxyFetch(url);
-         if (data && data.s === 'ok' && data.last && data.last.length > 0) {
+         if (data && data.s === 'ok' && data.last && Array.isArray(data.last) && data.last.length > 0) {
            return {
-             bid: this.roundTo(data.bid[0], 3),
-             ask: this.roundTo(data.ask[0], 3),
-             last: this.roundTo(data.last[0], 3)
+             bid: this.roundTo(data.bid ? data.bid[0] : 0, 3),
+             ask: this.roundTo(data.ask ? data.ask[0] : 0, 3),
+             last: this.roundTo(data.last ? data.last[0] : 0, 3)
            };
          }
          if (data && data.s === 'error') {

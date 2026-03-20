@@ -32,6 +32,7 @@ export interface TradeInputs {
 }
 
 export interface TradeCalculation {
+  date: string; // ISO date string YYYY-MM-DD
   calculatedStrike: number;
   collateral: number;
   dte: number;
