@@ -29,7 +29,7 @@ steps:
 substitutions:
   _SERVICE_NAME: 'csp-trade-validator'
   _REGION: 'us-central1'
-  _REPO_NAME: 'my-app-repo' # Replace with your Artifact Registry repository name
+  _REPO_NAME: 'CSP-Yield'
 
 # Fix for the "Failed to trigger build" error
 options:
