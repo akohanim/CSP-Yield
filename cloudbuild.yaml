@@ -1,0 +1,36 @@
+steps:
+  # 1. Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA',
+      '.'
+    ]
+
+  # 2. Push the Docker image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'push',
+      '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA'
+    ]
+
+  # 3. Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'deploy', '$_SERVICE_NAME',
+      '--image', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA',
+      '--region', '$_REGION',
+      '--platform', 'managed',
+      '--allow-unauthenticated'
+    ]
+
+# Substitutions allow you to customize these values
+substitutions:
+  _SERVICE_NAME: 'csp-trade-validator'
+  _REGION: 'us-central1'
+  _REPO_NAME: 'my-app-repo' # Replace with your Artifact Registry repository name
+
+# Fix for the "Failed to trigger build" error
+options:
+  logging: CLOUD_LOGGING_ONLY
