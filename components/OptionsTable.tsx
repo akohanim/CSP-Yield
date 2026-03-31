@@ -46,7 +46,7 @@ export const OptionsTable: React.FC<OptionsTableProps> = ({ marketData, inputs, 
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between px-1">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 px-1">
         <div className="flex items-center space-x-4">
           <div className="flex flex-col">
             <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Target Strike</span>
@@ -63,67 +63,115 @@ export const OptionsTable: React.FC<OptionsTableProps> = ({ marketData, inputs, 
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/50 backdrop-blur-sm">
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-900 border-b border-slate-800">
-              <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Expiration</th>
-              <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">DTE</th>
-              <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Strike</th>
-              <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Premium</th>
-              <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Eff. Yield (APY)</th>
-              <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/50">
-            {rows.map((row) => (
-              <tr 
-                key={row.date} 
-                className={`group transition-colors hover:bg-slate-800/40 ${inputs.selectedDate === row.date ? 'bg-indigo-500/10' : ''}`}
-              >
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex flex-col">
-                    <span className="font-bold text-slate-200">
-                      {new Date(row.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="font-mono text-slate-400">{row.dte}d</span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="font-mono font-bold text-emerald-400">${row.strike.toFixed(2)}</span>
-                  <span className="ml-2 text-[10px] text-slate-600 font-bold">
-                    ({((1 - row.strike / currentPrice) * 100).toFixed(1)}% OTM)
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right">
-                  <span className="font-mono font-bold text-indigo-400">${row.premium.toFixed(2)}</span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right">
-                  <span className={`font-mono font-black ${row.apy >= inputs.targetAPY ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {row.apy.toFixed(2)}%
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-center">
-                  <button
-                    onClick={() => onSelect(row.date)}
-                    className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                      inputs.selectedDate === row.date
-                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
-                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
-                    }`}
-                  >
-                    {inputs.selectedDate === row.date ? 'Selected' : 'Select'}
-                  </button>
-                </td>
+      {/* Mobile Card View */}
+      <div className="grid grid-cols-1 gap-3 sm:hidden">
+        {rows.map((row) => (
+          <div 
+            key={row.date}
+            onClick={() => onSelect(row.date)}
+            className={`p-4 rounded-2xl border transition-all cursor-pointer active:scale-[0.98] ${
+              inputs.selectedDate === row.date 
+                ? 'bg-indigo-500/10 border-indigo-500/50 shadow-lg shadow-indigo-500/10' 
+                : 'bg-slate-900/50 border-slate-800'
+            }`}
+          >
+            <div className="flex justify-between items-start mb-3">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Expiration</span>
+                <span className="font-bold text-slate-200">
+                  {new Date(row.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">{row.dte} days to exp.</span>
+              </div>
+              <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                inputs.selectedDate === row.date ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {inputs.selectedDate === row.date ? 'Selected' : 'Select'}
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-3 gap-2 pt-3 border-t border-slate-800/50">
+              <div>
+                <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest block mb-1">Strike</span>
+                <span className="font-mono font-bold text-emerald-400 text-sm">${row.strike.toFixed(2)}</span>
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest block mb-1">Premium</span>
+                <span className="font-mono font-bold text-indigo-400 text-sm">${row.premium.toFixed(2)}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest block mb-1">APY</span>
+                <span className={`font-mono font-black text-sm ${row.apy >= inputs.targetAPY ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {row.apy.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop Table View */}
+      <div className="hidden sm:block overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/50 backdrop-blur-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-900 border-b border-slate-800">
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Expiration</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">DTE</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Strike</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Premium</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Eff. Yield (APY)</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-800/50">
+              {rows.map((row) => (
+                <tr 
+                  key={row.date} 
+                  className={`group transition-colors hover:bg-slate-800/40 ${inputs.selectedDate === row.date ? 'bg-indigo-500/10' : ''}`}
+                >
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex flex-col">
+                      <span className="font-bold text-slate-200">
+                        {new Date(row.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="font-mono text-slate-400">{row.dte}d</span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="font-mono font-bold text-emerald-400">${row.strike.toFixed(2)}</span>
+                    <span className="ml-2 text-[10px] text-slate-600 font-bold">
+                      ({((1 - row.strike / currentPrice) * 100).toFixed(1)}% OTM)
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <span className="font-mono font-bold text-indigo-400">${row.premium.toFixed(2)}</span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <span className={`font-mono font-black ${row.apy >= inputs.targetAPY ? 'text-emerald-400' : 'text-slate-500'}`}>
+                      {row.apy.toFixed(2)}%
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                    <button
+                      onClick={() => onSelect(row.date)}
+                      className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                        inputs.selectedDate === row.date
+                          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                          : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+                      }`}
+                    >
+                      {inputs.selectedDate === row.date ? 'Selected' : 'Select'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
-  </div>
   );
 };

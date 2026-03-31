@@ -84,15 +84,15 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ calculation, inp
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-8">
-                  <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+                  <div className="bg-slate-900/80 p-4 sm:p-5 rounded-2xl border border-slate-800">
                       <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Required Credit</p>
-                      <p className="text-2xl font-mono text-slate-300">${calculation.requiredTotalCredit.toFixed(2)}</p>
+                      <p className="text-xl sm:text-2xl font-mono text-slate-300">${calculation.requiredTotalCredit.toFixed(2)}</p>
                       <p className="text-[9px] text-slate-600 mt-2">Targeting {inputs.targetAPY}% APY</p>
                   </div>
-                  <div className={`p-5 rounded-2xl border ${calculation.isTargetMet ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'}`}>
+                  <div className={`p-4 sm:p-5 rounded-2xl border ${calculation.isTargetMet ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'}`}>
                       <p className={`text-[10px] uppercase font-black tracking-widest mb-1 ${calculation.isTargetMet ? 'text-emerald-400' : 'text-rose-400'}`}>Market Premium</p>
-                      <p className={`text-2xl font-mono font-black ${calculation.isTargetMet ? 'text-emerald-300' : 'text-rose-300'}`}>${calculation.actualTotalCredit.toFixed(2)}</p>
+                      <p className={`text-xl sm:text-2xl font-mono font-black ${calculation.isTargetMet ? 'text-emerald-300' : 'text-rose-300'}`}>${calculation.actualTotalCredit.toFixed(2)}</p>
                       <p className="text-[9px] opacity-70 mt-2 text-slate-400">Current Bid Price</p>
                   </div>
                 </div>
@@ -115,18 +115,18 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ calculation, inp
             {/* Right Column: Key Metrics */}
             <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col">
               <h3 className="text-lg font-bold text-slate-100 mb-6 tracking-tight">Trade Summary</h3>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-6 flex-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-6 flex-1">
                 <div>
                   <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Strike Target</p>
-                  <p className="text-3xl font-mono text-white tracking-tighter">${calculation.calculatedStrike.toFixed(2)}</p>
+                  <p className="text-2xl sm:text-3xl font-mono text-white tracking-tighter">${calculation.calculatedStrike.toFixed(2)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Collateral Required</p>
-                  <p className="text-3xl font-mono text-indigo-400 tracking-tighter">${calculation.collateral.toLocaleString()}</p>
+                  <p className="text-2xl sm:text-3xl font-mono text-indigo-400 tracking-tighter">${calculation.collateral.toLocaleString()}</p>
                 </div>
                 <div>
                   <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Break-Even Price</p>
-                  <p className="text-3xl font-mono text-emerald-400 tracking-tighter">${calculation.netPurchasePrice.toFixed(2)}</p>
+                  <p className="text-2xl sm:text-3xl font-mono text-emerald-400 tracking-tighter">${calculation.netPurchasePrice.toFixed(2)}</p>
                 </div>
                 <div className="relative">
                   <div className="absolute right-0 top-0 w-16 h-16">
@@ -134,14 +134,15 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ calculation, inp
                       <PieChart>
                         <Pie 
                           data={[
-                            { name: 'Actual', value: calculation.actualAPY },
+                            { name: 'Option', value: calculation.optionAPY },
+                            { name: 'Collateral', value: calculation.collateralAPY },
                             { name: 'Target Gap', value: Math.max(0, inputs.targetAPY - calculation.actualAPY) },
                           ]} 
                           cx="50%" cy="50%" innerRadius={20} outerRadius={28} dataKey="value" startAngle={90} endAngle={-270} stroke="none"
                         >
-                          {[0, 1].map((entry, index) => (
-                            <Cell key={`c-${index}`} fill={calculation.isTargetMet ? ['#10b981', '#1e293b'][index] : ['#f43f5e', '#1e293b'][index]} />
-                          ))}
+                          <Cell key="option" fill={calculation.isTargetMet ? '#10b981' : '#f43f5e'} />
+                          <Cell key="collateral" fill="#f59e0b" />
+                          <Cell key="gap" fill="#1e293b" />
                         </Pie>
                       </PieChart>
                     </ResponsiveContainer>
@@ -150,6 +151,10 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ calculation, inp
                   <p className={`text-3xl font-mono font-black tracking-tighter ${calculation.isTargetMet ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {calculation.actualAPY.toFixed(1)}%
                   </p>
+                  <div className="flex gap-2 mt-1">
+                    <span className="text-[9px] text-slate-500 font-mono">Opt: {calculation.optionAPY.toFixed(1)}%</span>
+                    <span className="text-[9px] text-amber-500 font-mono">Col: {calculation.collateralAPY.toFixed(1)}%</span>
+                  </div>
                 </div>
               </div>
             </div>

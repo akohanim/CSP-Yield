@@ -4,16 +4,18 @@ import { MarketData, TradeInputs, TradeCalculation, OptionContract } from './typ
 import { DEFAULT_TARGET_APY, DEFAULT_TARGET_DISCOUNT, DEFAULT_TICKER } from './constants';
 import { marketService } from './services/marketDataService';
 import { InputPanel } from './components/InputPanel';
+import { YieldBooster } from './components/YieldBooster';
 import { ResultsDisplay } from './components/ResultsDisplay';
 import { OptionsTable } from './components/OptionsTable';
 import { GeminiInsight } from './components/GeminiInsight';
 import { TutorialModal } from './components/TutorialModal';
-import { HelpCircle } from 'lucide-react';
+import { ManualCalculator } from './components/ManualCalculator';
+import { HelpCircle, Activity, Calculator } from 'lucide-react';
 
 const App: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'live' | 'manual'>('manual');
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const [showLogs, setShowLogs] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [fetchingQuote, setFetchingQuote] = useState(false);
   const [activeQuote, setActiveQuote] = useState<Partial<OptionContract> | null>(null);
@@ -26,9 +28,8 @@ const App: React.FC = () => {
     targetAPY: DEFAULT_TARGET_APY,
     targetDiscount: DEFAULT_TARGET_DISCOUNT,
     selectedDate: null,
+    collateralYield: 0, // Default to 0 as requested
   });
-
-  const logsEndRef = useRef<HTMLDivElement>(null);
 
   const [backendStatus, setBackendStatus] = useState<{ hasApiKey: boolean; status: string } | null>(null);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -62,12 +63,6 @@ const App: React.FC = () => {
     });
     return () => unsubscribeLogs();
   }, []);
-
-  useEffect(() => {
-    if (showLogs && logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [logs, showLogs]);
 
   useEffect(() => {
     setInputs(prev => ({ ...prev, selectedDate: null }));
@@ -108,8 +103,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
-    let timer: NodeJS.Timeout | null = null;
-
     const updateQuote = async () => {
       if (!marketData || !inputs.selectedDate) return;
       
@@ -134,15 +127,8 @@ const App: React.FC = () => {
       }
     };
 
-    // Debounce the quote update to prevent API spam from slider moves
-    timer = setTimeout(() => {
-      updateQuote();
-    }, 400);
-
-    return () => { 
-      isMounted = false; 
-      if (timer) clearTimeout(timer);
-    };
+    updateQuote();
+    return () => { isMounted = false; };
   }, [marketData, inputs.selectedDate, inputs.targetDiscount]);
 
   const allCalculations: TradeCalculation[] = useMemo(() => {
@@ -167,7 +153,11 @@ const App: React.FC = () => {
       
       const actualPremiumPerShare = closestOption.bid || closestOption.last || 0;
       const actualTotalCredit = actualPremiumPerShare * 100;
-      const actualAPY = collateral > 0 ? (actualTotalCredit / collateral) * (365 / dte) * 100 : 0;
+      
+      const optionAPY = collateral > 0 ? (actualTotalCredit / collateral) * (365 / dte) * 100 : 0;
+      const collateralAPY = inputs.collateralYield;
+      const actualAPY = optionAPY + collateralAPY;
+      
       const netPurchasePrice = strike - actualPremiumPerShare;
 
       return {
@@ -178,13 +168,15 @@ const App: React.FC = () => {
         requiredTotalCredit,
         actualTotalCredit,
         actualAPY,
+        optionAPY,
+        collateralAPY,
         netPurchasePrice,
-        isTargetMet: actualTotalCredit >= requiredTotalCredit && actualTotalCredit > 0,
+        isTargetMet: actualAPY >= inputs.targetAPY && actualTotalCredit > 0,
         actualPremiumPerShare,
         option: closestOption
       };
     }).filter((c): c is TradeCalculation => c !== null);
-  }, [marketData, inputs.targetAPY, inputs.targetDiscount]);
+  }, [marketData, inputs.targetAPY, inputs.targetDiscount, inputs.collateralYield]);
 
   const calculation: TradeCalculation | null = useMemo(() => {
     if (!marketData || !inputs.selectedDate) return null;
@@ -215,7 +207,11 @@ const App: React.FC = () => {
 
     const actualPremiumPerShare = mergedOption.bid || mergedOption.last || 0; 
     const actualTotalCredit = actualPremiumPerShare * 100;
-    const actualAPY = collateral > 0 ? (actualTotalCredit / collateral) * (365 / dte) * 100 : 0;
+    
+    const optionAPY = collateral > 0 ? (actualTotalCredit / collateral) * (365 / dte) * 100 : 0;
+    const collateralAPY = inputs.collateralYield;
+    const actualAPY = optionAPY + collateralAPY;
+    
     const netPurchasePrice = strike - actualPremiumPerShare;
 
     return {
@@ -226,12 +222,14 @@ const App: React.FC = () => {
       requiredTotalCredit,
       actualTotalCredit,
       actualAPY,
+      optionAPY,
+      collateralAPY,
       netPurchasePrice,
-      isTargetMet: actualTotalCredit >= requiredTotalCredit && actualTotalCredit > 0,
+      isTargetMet: actualAPY >= inputs.targetAPY && actualTotalCredit > 0,
       actualPremiumPerShare,
       option: mergedOption
     };
-  }, [marketData, inputs.selectedDate, inputs.targetAPY, inputs.targetDiscount, activeQuote]);
+  }, [marketData, inputs.selectedDate, inputs.targetAPY, inputs.targetDiscount, inputs.collateralYield, activeQuote]);
 
   const [pulse, setPulse] = useState(false);
   useEffect(() => {
@@ -246,69 +244,60 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-slate-950 text-slate-200 pb-80 selection:bg-indigo-500/30">
       {showTutorial && <TutorialModal onClose={handleTutorialClose} />}
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 backdrop-blur-xl bg-opacity-90">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-             <div className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center text-white font-black font-mono shadow-lg shadow-indigo-600/20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center space-x-2 sm:space-x-3">
+             <div className="w-8 h-8 sm:w-10 sm:h-10 bg-indigo-600 rounded-xl sm:rounded-2xl flex items-center justify-center text-white font-black font-mono shadow-lg shadow-indigo-600/20 text-xs sm:text-base">
                DB
              </div>
-             <h1 className="text-lg font-black tracking-tighter text-white uppercase">
+             <h1 className="text-sm sm:text-lg font-black tracking-tighter text-white uppercase">
                CSP <span className="text-indigo-500">PRO</span>
              </h1>
           </div>
           
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-4">
             <button 
               onClick={() => setShowTutorial(true)}
-              className="p-2 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+              className="p-1.5 sm:p-2 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
               title="Show Tutorial"
             >
               <HelpCircle className="w-4 h-4" />
-              <span className="hidden sm:inline">Help</span>
+              <span className="hidden md:inline">Help</span>
             </button>
-            <div className="h-4 w-[1px] bg-slate-800"></div>
+            <div className="hidden sm:block h-4 w-[1px] bg-slate-800"></div>
             {backendStatus && !backendStatus.hasApiKey && (
-              <div className="px-3 py-1 bg-red-950/30 border border-red-900/50 rounded-lg text-[10px] font-bold text-red-400 uppercase tracking-tighter animate-pulse">
-                MISSING MARKETDATA_API_KEY
+              <div className="hidden lg:block px-3 py-1 bg-red-950/30 border border-red-900/50 rounded-lg text-[10px] font-bold text-red-400 uppercase tracking-tighter animate-pulse">
+                MISSING API KEY
               </div>
             )}
             <button 
               onClick={handleReconnect}
               title="Retry MarketData.app Sync"
-              className={`flex items-center px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest border transition-all hover:scale-105 active:scale-95 ${reconnecting ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-emerald-950/20 text-emerald-400 border-emerald-900/50'}`}
+              className={`flex items-center px-3 sm:px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest border transition-all hover:scale-105 active:scale-95 ${reconnecting ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-emerald-950/20 text-emerald-400 border-emerald-900/50'}`}
             >
                <span className={`w-2 h-2 rounded-full mr-2 ${reconnecting ? 'bg-white animate-ping' : 'bg-emerald-400 animate-pulse'}`}></span>
-               {reconnecting ? 'RECONNECTING...' : 'FEED: LIVE'}
+               <span className="hidden xs:inline">{reconnecting ? 'RECONNECTING...' : 'FEED: LIVE'}</span>
+               <span className="xs:hidden">{reconnecting ? '...' : 'LIVE'}</span>
             </button>
 
-            <button 
-              onClick={() => setShowLogs(!showLogs)}
-              className="p-2 bg-slate-800 rounded-xl hover:bg-slate-700 transition-colors"
-              title="Toggle Debug Logs"
-            >
-              <svg className={`w-5 h-5 ${showLogs ? 'text-indigo-400' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </button>
-
-            <div className={`flex items-center space-x-4 bg-slate-950 rounded-2xl px-5 py-2 border transition-all duration-300 ${pulse ? 'border-indigo-500 shadow-lg shadow-indigo-500/10' : 'border-slate-800'}`}>
+            <div className={`flex items-center space-x-2 sm:space-x-4 bg-slate-950 rounded-xl sm:rounded-2xl px-3 sm:px-5 py-1.5 sm:py-2 border transition-all duration-300 ${pulse ? 'border-indigo-500 shadow-lg shadow-indigo-500/10' : 'border-slate-800'}`}>
               <div className="flex flex-col items-start">
                 <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Ticker</span>
-                <span className="font-mono font-black text-indigo-400 uppercase text-sm leading-none">{inputs.ticker}</span>
+                <span className="font-mono font-black text-indigo-400 uppercase text-xs sm:text-sm leading-none">{inputs.ticker}</span>
               </div>
-              <span className="h-6 w-px bg-slate-800"></span>
-              <div className="flex flex-col items-start min-w-[80px]">
+              <span className="h-4 sm:h-6 w-px bg-slate-800"></span>
+              <div className="flex flex-col items-start min-w-[60px] sm:min-w-[80px]">
                 <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Price</span>
-                <span className={`font-mono font-bold text-sm leading-none transition-all duration-200 ${isSyncing ? 'animate-pulse text-slate-600' : (pulse ? 'text-indigo-400' : 'text-slate-100')}`}>
-                  {marketData && marketData.currentPrice > 0 ? `$${marketData.currentPrice.toFixed(2)}` : (isSyncing ? 'SYNCING...' : '---')}
+                <span className={`font-mono font-bold text-xs sm:text-sm leading-none transition-all duration-200 ${isSyncing ? 'animate-pulse text-slate-600' : (pulse ? 'text-indigo-400' : 'text-slate-100')}`}>
+                  {marketData && marketData.currentPrice > 0 ? `$${marketData.currentPrice.toFixed(2)}` : (isSyncing ? 'SYNC' : '---')}
                 </span>
               </div>
               <button 
                 onClick={handleRefresh}
                 disabled={refreshing || !marketData}
-                className={`p-1.5 rounded-lg transition-all ${refreshing ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-indigo-400 hover:bg-slate-700'}`}
+                className={`p-1 rounded-lg transition-all ${refreshing ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-indigo-400 hover:bg-slate-700'}`}
                 title="Refresh Price"
               >
-                <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </button>
@@ -317,7 +306,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-12 space-y-10">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-12 space-y-6 sm:space-y-10">
         <div className="max-w-3xl">
           <h2 className="text-4xl font-black text-white mb-4 tracking-tighter">Cash Secured Puts: Yields, Verified</h2>
           <p className="text-slate-500 leading-relaxed text-lg">
@@ -325,76 +314,102 @@ const App: React.FC = () => {
           </p>
         </div>
 
-        <InputPanel inputs={inputs} setInputs={setInputs} />
+        {/* Tab Toggle */}
+        <div className="flex p-1.5 bg-slate-900 border border-slate-800 rounded-2xl w-fit">
+          <button 
+            onClick={() => setActiveTab('live')}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'live' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            <Activity className="w-4 h-4" />
+            Live Market
+          </button>
+          <button 
+            onClick={() => setActiveTab('manual')}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'manual' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            <Calculator className="w-4 h-4" />
+            Manual Calc
+          </button>
+        </div>
 
-        {isSyncing && !marketData && (
-          <div className="bg-slate-900/30 p-20 rounded-3xl border border-slate-800/40 backdrop-blur-sm flex flex-col items-center justify-center space-y-4">
-            <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
-            <p className="text-slate-500 font-black uppercase tracking-widest text-xs">Synchronizing with MarketData.app...</p>
-          </div>
-        )}
+        {activeTab === 'live' ? (
+          <>
+            <InputPanel inputs={inputs} setInputs={setInputs} />
 
-        {!isSyncing && !marketData && (
-          <div className="bg-slate-900/30 p-20 rounded-3xl border border-slate-800/40 backdrop-blur-sm flex flex-col items-center justify-center space-y-6 text-center">
-            <div className="w-16 h-16 bg-red-950/20 rounded-full flex items-center justify-center text-red-500">
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-xl font-black text-white uppercase tracking-tighter">Connection Failed</h3>
-              <p className="text-slate-500 max-w-md mx-auto">
-                {errorMsg || "We couldn't retrieve market data for this ticker. Please verify your API key and ticker symbol."}
-              </p>
-            </div>
-            {backendStatus && !backendStatus.hasApiKey && (
-              <div className="p-4 bg-indigo-950/20 border border-indigo-900/50 rounded-2xl max-w-md">
-                <p className="text-indigo-400 text-xs font-bold uppercase tracking-wide mb-3">
-                  API Key Required for Live Data
-                </p>
-                <p className="text-slate-400 text-[10px] leading-relaxed mb-4">
-                  To get real-time options data, you must add your MarketData.app API key to the project secrets.
-                </p>
-                <div className="text-left text-[10px] space-y-1 text-slate-500 font-mono bg-slate-950 p-3 rounded-lg">
-                  <div>1. Open Settings (⚙️ gear icon)</div>
-                  <div>2. Select Secrets</div>
-                  <div>3. Key: MARKETDATA_API_KEY</div>
-                  <div>4. Value: [Your API Key]</div>
-                </div>
+            <YieldBooster />
+
+            {isSyncing && !marketData && (
+              <div className="bg-slate-900/30 p-20 rounded-3xl border border-slate-800/40 backdrop-blur-sm flex flex-col items-center justify-center space-y-4">
+                <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+                <p className="text-slate-500 font-black uppercase tracking-widest text-xs">Synchronizing with MarketData.app...</p>
               </div>
             )}
-            <button 
-              onClick={handleReconnect}
-              className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20"
-            >
-              Retry Connection
-            </button>
-          </div>
-        )}
 
-        {marketData && (
-          <div className="bg-slate-900/30 p-8 rounded-3xl border border-slate-800/40 backdrop-blur-sm">
-             <OptionsTable 
-               marketData={marketData} 
-               inputs={inputs} 
-               onSelect={(date) => setInputs(prev => ({ ...prev, selectedDate: date }))}
-             />
-             
-             <div className={fetchingQuote ? 'opacity-40 grayscale blur-[1px] transition-all duration-300' : 'transition-all duration-300'}>
-               <ResultsDisplay 
-                  calculation={calculation} 
+            {!isSyncing && !marketData && (
+              <div className="bg-slate-900/30 p-20 rounded-3xl border border-slate-800/40 backdrop-blur-sm flex flex-col items-center justify-center space-y-6 text-center">
+                <div className="w-16 h-16 bg-red-950/20 rounded-full flex items-center justify-center text-red-500">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-black text-white uppercase tracking-tighter">Connection Failed</h3>
+                  <p className="text-slate-500 max-w-md mx-auto">
+                    {errorMsg || "We couldn't retrieve market data for this ticker. Please verify your API key and ticker symbol."}
+                  </p>
+                </div>
+                {backendStatus && !backendStatus.hasApiKey && (
+                  <div className="p-4 bg-indigo-950/20 border border-indigo-900/50 rounded-2xl max-w-md">
+                    <p className="text-indigo-400 text-xs font-bold uppercase tracking-wide mb-3">
+                      API Key Required for Live Data
+                    </p>
+                    <p className="text-slate-400 text-[10px] leading-relaxed mb-4">
+                      To get real-time options data, you must add your MarketData.app API key to the project secrets.
+                    </p>
+                    <div className="text-left text-[10px] space-y-1 text-slate-500 font-mono bg-slate-950 p-3 rounded-lg">
+                      <div>1. Open Settings (⚙️ gear icon)</div>
+                      <div>2. Select Secrets</div>
+                      <div>3. Key: MARKETDATA_API_KEY</div>
+                      <div>4. Value: [Your API Key]</div>
+                    </div>
+                  </div>
+                )}
+                <button 
+                  onClick={handleReconnect}
+                  className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20"
+                >
+                  Retry Connection
+                </button>
+              </div>
+            )}
+
+            {marketData && (
+              <div className="bg-slate-900/30 p-8 rounded-3xl border border-slate-800/40 backdrop-blur-sm">
+                <OptionsTable 
+                  marketData={marketData} 
                   inputs={inputs} 
+                  onSelect={(date) => setInputs(prev => ({ ...prev, selectedDate: date }))}
                 />
-             </div>
+                
+                <div className={fetchingQuote ? 'opacity-40 grayscale blur-[1px] transition-all duration-300' : 'transition-all duration-300'}>
+                  <ResultsDisplay 
+                      calculation={calculation} 
+                      inputs={inputs} 
+                    />
+                </div>
 
-             {calculation && marketData && !fetchingQuote && (
-               <GeminiInsight 
-                 inputs={inputs} 
-                 calculation={calculation} 
-                 currentPrice={marketData.currentPrice} 
-               />
-             )}
-          </div>
+                {calculation && marketData && !fetchingQuote && (
+                  <GeminiInsight 
+                    inputs={inputs} 
+                    calculation={calculation} 
+                    currentPrice={marketData.currentPrice} 
+                  />
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <ManualCalculator />
         )}
 
         <footer className="pt-12 border-t border-slate-800/50">
@@ -403,38 +418,6 @@ const App: React.FC = () => {
           </p>
         </footer>
       </main>
-
-      <div className={`fixed bottom-0 left-0 right-0 bg-slate-950 border-t border-slate-800 transition-all duration-500 ease-in-out ${showLogs ? 'h-72' : 'h-12'}`}>
-        <div 
-          className="flex items-center justify-between px-6 h-12 bg-slate-900 cursor-pointer hover:bg-slate-850"
-          onClick={() => setShowLogs(!showLogs)}
-        >
-           <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-3">
-             <span className={`w-2 h-2 rounded-full bg-emerald-500 animate-pulse`}></span>
-             MarketData.app Engine Traffic
-           </h3>
-           <span className="text-slate-600 text-[10px] font-black uppercase tracking-widest">{showLogs ? 'Hide Activity' : 'Show Activity'}</span>
-        </div>
-        
-        {showLogs && (
-          <div className="h-60 overflow-y-auto p-6 font-mono text-[11px] leading-relaxed text-slate-400 bg-slate-950/50">
-            {logs.map((log, i) => {
-              const isError = log.includes('[ERROR]') || log.includes('failed');
-              const isDebug = log.includes('[DEBUG]');
-              return (
-                <div key={i} className={`mb-1 border-l-2 pl-3 py-0.5 ${
-                  isError ? 'border-rose-800 bg-rose-950/10 text-rose-300' : 
-                  isDebug ? 'border-amber-800/40 text-amber-500/80' : 
-                  'border-indigo-900/40'
-                }`}>
-                  {log}
-                </div>
-              );
-            })}
-            <div ref={logsEndRef} />
-          </div>
-        )}
-      </div>
     </div>
   );
 };
