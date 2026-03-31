@@ -29,7 +29,7 @@ steps:
 substitutions:
   _SERVICE_NAME: 'csp-trade-validator'
   _REGION: 'us-central1'
-  _REPO_NAME: 'CSP-Yield'
+  _REPO_NAME: 'csp-yield'
 
 # Fix for the "Failed to trigger build" error
 options:
