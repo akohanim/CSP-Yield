@@ -31,7 +31,7 @@ const App: React.FC = () => {
     collateralYield: 0, // Default to 0 as requested
   });
 
-  const [backendStatus, setBackendStatus] = useState<{ hasApiKey: boolean; status: string } | null>(null);
+  const [backendStatus, setBackendStatus] = useState<{ status: string } | null>(null);
   const [showTutorial, setShowTutorial] = useState(false);
 
   // Check for first-time user
@@ -51,7 +51,7 @@ const App: React.FC = () => {
     fetch('/api/status')
       .then(res => res.json())
       .then(data => setBackendStatus(data))
-      .catch(() => setBackendStatus({ hasApiKey: false, status: 'error' }));
+      .catch(() => setBackendStatus({ status: 'error' }));
   }, []);
 
   useEffect(() => {
@@ -264,11 +264,6 @@ const App: React.FC = () => {
               <span className="hidden md:inline">Help</span>
             </button>
             <div className="hidden sm:block h-4 w-[1px] bg-slate-800"></div>
-            {backendStatus && !backendStatus.hasApiKey && (
-              <div className="hidden lg:block px-3 py-1 bg-red-950/30 border border-red-900/50 rounded-lg text-[10px] font-bold text-red-400 uppercase tracking-tighter animate-pulse">
-                MISSING API KEY
-              </div>
-            )}
             <div className={`flex items-center space-x-2 sm:space-x-4 bg-slate-950 rounded-xl sm:rounded-2xl px-3 sm:px-5 py-1.5 sm:py-2 border transition-all duration-300 ${pulse ? 'border-indigo-500 shadow-lg shadow-indigo-500/10' : 'border-slate-800'}`}>
               <div className="flex flex-col items-start">
                 <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Ticker</span>
