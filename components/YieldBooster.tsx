@@ -19,9 +19,9 @@ export const YieldBooster: React.FC = () => {
         >
           <div>
             <p className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors">Robinhood Gold</p>
-            <p className="text-[10px] text-slate-500">Earn 5.0% APY on idle cash</p>
+            <p className="text-[10px] text-slate-500">Earn 3.3% APY on idle cash</p>
           </div>
-          <div className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded uppercase">Get 5%</div>
+          <div className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded uppercase">Get 3.3%</div>
         </a>
         <a 
           href="https://www.fidelity.com" 
