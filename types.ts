@@ -7,6 +7,7 @@ export interface OptionContract {
   last: number | null;
   vol: number | null;
   oi: number | null;
+  iv: number | null;
   delta: number | null;
   theta: number | null;
 }

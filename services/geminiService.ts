@@ -30,9 +30,9 @@ export const analyzeTradeRisk = async (
   `;
 
   try {
-    // Using gemini-3-pro-preview for advanced financial reasoning
+    // Using gemini-3-flash-preview for advanced financial reasoning
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview',
       contents: prompt,
     });
     // Use .text property getter as per guidelines

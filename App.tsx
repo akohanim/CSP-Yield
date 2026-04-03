@@ -13,7 +13,7 @@ import { ManualCalculator } from './components/ManualCalculator';
 import { HelpCircle, Activity, Calculator } from 'lucide-react';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'live' | 'manual'>('manual');
+  const [activeTab, setActiveTab] = useState<'live' | 'manual'>('live');
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -269,16 +269,6 @@ const App: React.FC = () => {
                 MISSING API KEY
               </div>
             )}
-            <button 
-              onClick={handleReconnect}
-              title="Retry MarketData.app Sync"
-              className={`flex items-center px-3 sm:px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest border transition-all hover:scale-105 active:scale-95 ${reconnecting ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-emerald-950/20 text-emerald-400 border-emerald-900/50'}`}
-            >
-               <span className={`w-2 h-2 rounded-full mr-2 ${reconnecting ? 'bg-white animate-ping' : 'bg-emerald-400 animate-pulse'}`}></span>
-               <span className="hidden xs:inline">{reconnecting ? 'RECONNECTING...' : 'FEED: LIVE'}</span>
-               <span className="xs:hidden">{reconnecting ? '...' : 'LIVE'}</span>
-            </button>
-
             <div className={`flex items-center space-x-2 sm:space-x-4 bg-slate-950 rounded-xl sm:rounded-2xl px-3 sm:px-5 py-1.5 sm:py-2 border transition-all duration-300 ${pulse ? 'border-indigo-500 shadow-lg shadow-indigo-500/10' : 'border-slate-800'}`}>
               <div className="flex flex-col items-start">
                 <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Ticker</span>
@@ -310,7 +300,7 @@ const App: React.FC = () => {
         <div className="max-w-3xl">
           <h2 className="text-4xl font-black text-white mb-4 tracking-tighter">Cash Secured Puts: Yields, Verified</h2>
           <p className="text-slate-500 leading-relaxed text-lg">
-            Verify your CSP yield with real-time data and institutional-grade trade math. Powered by MarketData.app for the precision every CSP trader needs.
+            Verify your CSP yield with data and institutional-grade trade math.
           </p>
         </div>
 
@@ -321,7 +311,7 @@ const App: React.FC = () => {
             className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'live' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
           >
             <Activity className="w-4 h-4" />
-            Live Market
+            Market Data
           </button>
           <button 
             onClick={() => setActiveTab('manual')}
@@ -341,7 +331,7 @@ const App: React.FC = () => {
             {isSyncing && !marketData && (
               <div className="bg-slate-900/30 p-20 rounded-3xl border border-slate-800/40 backdrop-blur-sm flex flex-col items-center justify-center space-y-4">
                 <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
-                <p className="text-slate-500 font-black uppercase tracking-widest text-xs">Synchronizing with MarketData.app...</p>
+                <p className="text-slate-500 font-black uppercase tracking-widest text-xs">Synchronizing with Market Data...</p>
               </div>
             )}
 
@@ -355,25 +345,9 @@ const App: React.FC = () => {
                 <div className="space-y-2">
                   <h3 className="text-xl font-black text-white uppercase tracking-tighter">Connection Failed</h3>
                   <p className="text-slate-500 max-w-md mx-auto">
-                    {errorMsg || "We couldn't retrieve market data for this ticker. Please verify your API key and ticker symbol."}
+                    {errorMsg || "We couldn't retrieve market data for this ticker. Please verify the ticker symbol."}
                   </p>
                 </div>
-                {backendStatus && !backendStatus.hasApiKey && (
-                  <div className="p-4 bg-indigo-950/20 border border-indigo-900/50 rounded-2xl max-w-md">
-                    <p className="text-indigo-400 text-xs font-bold uppercase tracking-wide mb-3">
-                      API Key Required for Live Data
-                    </p>
-                    <p className="text-slate-400 text-[10px] leading-relaxed mb-4">
-                      To get real-time options data, you must add your MarketData.app API key to the project secrets.
-                    </p>
-                    <div className="text-left text-[10px] space-y-1 text-slate-500 font-mono bg-slate-950 p-3 rounded-lg">
-                      <div>1. Open Settings (⚙️ gear icon)</div>
-                      <div>2. Select Secrets</div>
-                      <div>3. Key: MARKETDATA_API_KEY</div>
-                      <div>4. Value: [Your API Key]</div>
-                    </div>
-                  </div>
-                )}
                 <button 
                   onClick={handleReconnect}
                   className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20"
@@ -414,7 +388,7 @@ const App: React.FC = () => {
 
         <footer className="pt-12 border-t border-slate-800/50">
           <p className="text-[10px] text-slate-600 leading-relaxed max-w-4xl">
-            <span className="font-bold text-slate-500">Disclaimer:</span> Options involve risk and are not suitable for all investors. This app provides data analysis and mathematical validation for informational and entertainment purposes only; it does not constitute financial advice or a recommendation to buy or sell any security. Past performance is not indicative of future results. Real-time data is provided by MarketData.app; while we strive for accuracy, system errors or lag can occur.
+            <span className="font-bold text-slate-500">Disclaimer:</span> Options involve risk and are not suitable for all investors. This app provides data analysis and mathematical validation for informational and entertainment purposes only; it does not constitute financial advice or a recommendation to buy or sell any security. Past performance is not indicative of future results. Data is provided by Yahoo Finance; while we strive for accuracy, system errors or lag can occur.
           </p>
         </footer>
       </main>

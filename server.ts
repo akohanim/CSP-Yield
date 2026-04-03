@@ -1,13 +1,12 @@
 import express from "express";
-import axios from "axios";
+import YahooFinance from 'yahoo-finance2';
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Constants from constants.ts (manually copied to avoid import issues in server.ts)
-const MARKETDATA_API_BASE = "https://api.marketdata.app/v1";
+const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
 async function startServer() {
   const app = express();
@@ -15,11 +14,11 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Health check and debug info
+  // Health check
   app.get("/api/status", (req, res) => {
     res.json({ 
       status: "ok", 
-      hasApiKey: !!process.env.MARKETDATA_API_KEY,
+      backend: "node/yahoo-finance",
       env: process.env.NODE_ENV 
     });
   });
@@ -28,16 +27,16 @@ async function startServer() {
   const bulkCache = new Map<string, { data: any, timestamp: number }>();
   const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-  // Bulk Options Chain Endpoint
+  // Optimized Bulk Options Endpoint using Yahoo Finance
   app.get("/api/bulk-options", async (req, res) => {
     const { ticker } = req.query;
     if (!ticker || typeof ticker !== 'string') {
-      return res.status(400).json({ error: "Missing ticker parameter" });
+      return res.status(400).json({ error: "Ticker is required", s: "error" });
     }
 
     const upperTicker = ticker.toUpperCase();
     const now = Date.now();
-    
+
     // Check cache
     const cached = bulkCache.get(upperTicker);
     if (cached && (now - cached.timestamp) < CACHE_TTL) {
@@ -45,161 +44,140 @@ async function startServer() {
       return res.json(cached.data);
     }
 
-    const apiKey = process.env.MARKETDATA_API_KEY;
-    const effectiveApiKey = (apiKey && apiKey.trim() !== "") ? apiKey.trim() : null;
-    
     console.log(`[Bulk Options Request] Ticker: ${upperTicker}`);
 
     try {
-      const headers: Record<string, string> = {
-        'Accept': 'application/json',
-        'User-Agent': 'CSP-Validator-Pro/1.0'
-      };
+      console.log(`[Bulk Options] Fetching initial Yahoo data for ${upperTicker}...`);
+      const initialData = await yahooFinance.options(upperTicker) as any;
+      const expirationDates = initialData.expirationDates || [];
 
-      if (effectiveApiKey) {
-        headers['Authorization'] = `Bearer ${effectiveApiKey}`;
+      if (expirationDates.length === 0) {
+        return res.json({ s: 'ok', expirations: {} });
       }
 
-      // Step 1: Fetch expirations list
-      const expUrl = `${MARKETDATA_API_BASE}/options/expirations/${upperTicker}/`;
-      const expResponse = await axios.get(expUrl, { headers });
-      
-      if (expResponse.status >= 400 || !expResponse.data || expResponse.data.s !== 'ok') {
-        return res.status(expResponse.status || 500).json(expResponse.data || { error: "Failed to fetch expirations" });
-      }
-
-      const expirations = (expResponse.data.expirations || []).slice(0, 26);
-      console.log(`[Bulk Options] Found ${expirations.length} expirations for ${upperTicker}`);
-
-      // Step 2: Fetch all chains in parallel
+      const topExpirations = expirationDates.slice(0, 10);
       const expirationsMap: Record<string, any[]> = {};
-      
-      const chainPromises = expirations.map(async (expDate: string) => {
+
+      const chainPromises = topExpirations.map(async (expDate: Date) => {
         try {
-          const chainUrl = `${MARKETDATA_API_BASE}/options/chain/${upperTicker}/?side=put&expiration=${expDate}&range=all`;
-          const chainResponse = await axios.get(chainUrl, { headers, timeout: 10000 });
-          
-          if (chainResponse.data && chainResponse.data.s === 'ok' && chainResponse.data.strike) {
-            const data = chainResponse.data;
-            const contracts = [];
-            for (let i = 0; i < data.strike.length; i++) {
-              contracts.push({
-                ticker: (data.optionSymbol && data.optionSymbol[i]) || (data.symbol && data.symbol[i]) || 'UNKNOWN',
-                strike: data.strike[i],
-                bid: data.bid ? data.bid[i] : 0,
-                ask: data.ask ? data.ask[i] : 0,
-                last: data.last ? data.last[i] : 0,
-                vol: data.volume ? data.volume[i] : 0,
-                oi: data.openInterest ? data.openInterest[i] : 0,
-                delta: data.delta ? data.delta[i] : -0.3,
-                theta: data.theta ? data.theta[i] : -0.05
-              });
+          const formattedDate = expDate.toISOString().split('T')[0];
+          const chainData = await yahooFinance.options(upperTicker, { date: formattedDate }) as any;
+          const currentOption = chainData.options?.[0];
+          if (currentOption && currentOption.puts) {
+            const contracts = currentOption.puts.map((row: any) => ({
+              ticker: row.contractSymbol || 'UNKNOWN',
+              strike: row.strike || 0,
+              bid: row.bid || 0,
+              ask: row.ask || 0,
+              last: row.lastPrice || 0,
+              vol: row.volume || 0,
+              oi: row.openInterest || 0,
+              updated: row.lastTradeDate ? row.lastTradeDate.toISOString() : '',
+              iv: row.impliedVolatility || 0,
+              delta: -0.3,
+              theta: -0.05
+            }));
+            if (contracts.length > 0) {
+              expirationsMap[formattedDate] = contracts;
             }
-            expirationsMap[expDate] = contracts;
           }
         } catch (err: any) {
-          console.error(`[Bulk Options] Failed to fetch chain for ${expDate}: ${err.message}`);
+          console.error(`[Bulk Options] Yahoo failed for ${expDate}: ${err.message}`);
         }
       });
 
       await Promise.all(chainPromises);
-
-      const result = {
-        s: 'ok',
-        expirations: expirationsMap
-      };
-
-      // Store in cache
-      bulkCache.set(upperTicker, { data: result, timestamp: now });
-
-      console.log(`[Bulk Options Success] Aggregated ${Object.keys(expirationsMap).length} expirations for ${upperTicker}`);
+      const result = { s: 'ok', expirations: expirationsMap };
+      bulkCache.set(upperTicker, { timestamp: now, data: result });
       return res.json(result);
-    } catch (error: any) {
-      console.error(`[Bulk Options Error] ${error.message}`);
-      res.status(500).json({ error: error.message });
+
+    } catch (err: any) {
+      console.error(`[Bulk Options Error] ${upperTicker}: ${err.message}`);
+      return res.status(500).json({ error: err.message, s: "error" });
     }
   });
 
-  // API Proxy for MarketData.app to bypass CORS
+  // API Proxy for Yahoo Finance
   app.get("/api/market-data", async (req, res) => {
-    const { url } = req.query;
-    if (!url || typeof url !== 'string') {
-      return res.status(400).json({ error: "Missing URL parameter" });
-    }
+    const { ticker, url } = req.query;
+    let targetTicker = ticker as string;
 
-    const apiKey = process.env.MARKETDATA_API_KEY;
-    
-    // Ensure we don't send "undefined" or empty string as a token
-    const effectiveApiKey = (apiKey && apiKey.trim() !== "") ? apiKey.trim() : null;
-    
-    console.log(`[Proxy Request] URL: ${url}`);
-    if (effectiveApiKey) {
-      console.log(`[Proxy Request] Using API Key: ${effectiveApiKey.substring(0, 5)}...`);
-    } else {
-      console.log(`[Proxy Request] No valid API Key provided, using public/unauthenticated access.`);
-    }
-
-    try {
-      const headers: Record<string, string> = {
-        'Accept': 'application/json',
-        'User-Agent': 'CSP-Validator-Pro/1.0'
-      };
-
-      if (effectiveApiKey) {
-        headers['Authorization'] = `Bearer ${effectiveApiKey}`;
+    // Handle legacy url parameter if present
+    if (url && typeof url === 'string') {
+      const quoteMatch = url.match(/\/quotes\/([^\/]+)\//);
+      if (quoteMatch) {
+        targetTicker = quoteMatch[1].toUpperCase();
+        try {
+          const quote = await yahooFinance.quote(targetTicker);
+          return res.json({
+            s: 'ok',
+            last: [quote.regularMarketPrice || quote.lastPrice || 0],
+            ticker: [targetTicker],
+            symbol: [targetTicker]
+          });
+        } catch (err: any) {
+          return res.status(500).json({ error: err.message, s: "error" });
+        }
+      }
+      
+      const expMatch = url.match(/\/expirations\/([^\/]+)\//);
+      if (expMatch) {
+        targetTicker = expMatch[1].toUpperCase();
+        try {
+          const optionsData = await yahooFinance.options(targetTicker) as any;
+          const expirations = (optionsData.expirationDates || []).map((d: Date) => d.toISOString().split('T')[0]);
+          return res.json({ s: 'ok', expirations });
+        } catch (err: any) {
+          return res.status(500).json({ error: err.message, s: "error" });
+        }
       }
 
-      const response = await axios.get(url, {
-        headers,
-        timeout: 15000, // 15s timeout
-        validateStatus: (status) => status < 500 // Don't throw for 4xx, we want to handle them
-      });
-      
-      if (response.status >= 400) {
-        const errorData = response.data || {};
-        const errorMsg = errorData.errmsg || errorData.error || `Status ${response.status}`;
-        
-        console.warn(`[Proxy API Warning] Status: ${response.status}, Message: ${errorMsg}`);
-        
-        // Handle specific status codes as requested
-        if (response.status === 401) {
-          return res.status(401).json({
-            error: "Unauthorized: Invalid or missing API Token.",
-            s: "error",
-            details: errorData
-          });
+      const chainMatch = url.match(/\/chain\/([^\/]+)\//);
+      if (chainMatch) {
+        targetTicker = chainMatch[1].toUpperCase();
+        const urlObj = new URL(url, "http://localhost");
+        const expiration = urlObj.searchParams.get("expiration");
+        if (expiration) {
+          try {
+            const chainData = await yahooFinance.options(targetTicker, { date: expiration }) as any;
+            const currentOption = chainData.options?.[0];
+            if (currentOption && currentOption.puts) {
+              return res.json({
+                s: 'ok',
+                strike: currentOption.puts.map((p: any) => p.strike),
+                bid: currentOption.puts.map((p: any) => p.bid),
+                ask: currentOption.puts.map((p: any) => p.ask),
+                last: currentOption.puts.map((p: any) => p.lastPrice),
+                volume: currentOption.puts.map((p: any) => p.volume),
+                openInterest: currentOption.puts.map((p: any) => p.openInterest),
+                symbol: currentOption.puts.map((p: any) => p.contractSymbol),
+                updated: currentOption.puts.map((p: any) => p.lastTradeDate ? p.lastTradeDate.toISOString() : ''),
+                iv: currentOption.puts.map((p: any) => p.impliedVolatility)
+              });
+            }
+            return res.json({ s: 'ok', strike: [], bid: [], ask: [], last: [], volume: [], openInterest: [], symbol: [], updated: [], iv: [] });
+          } catch (err: any) {
+            return res.status(500).json({ error: err.message, s: "error" });
+          }
         }
-        
-        if (response.status === 429) {
-          return res.status(429).json({
-            error: "Rate Limit Exceeded: Please slow down or upgrade your plan.",
-            s: "error",
-            details: errorData
-          });
-        }
+      }
+    }
 
-        return res.status(response.status).json({
-          error: errorMsg,
-          s: "error",
-          details: errorData
+    if (targetTicker) {
+      try {
+        const quote = await yahooFinance.quote(targetTicker.toUpperCase());
+        return res.json({
+          s: 'ok',
+          last: [quote.regularMarketPrice || quote.lastPrice || 0],
+          symbol: [targetTicker.toUpperCase()],
+          ticker: [targetTicker.toUpperCase()]
         });
+      } catch (err: any) {
+        return res.status(500).json({ error: err.message, s: "error" });
       }
-
-      console.log(`[Proxy Success] Status: ${response.status}`);
-      res.json(response.data);
-    } catch (error: any) {
-      const status = error.response?.status || 500;
-      const errorData = error.response?.data || {};
-      const errorMsg = errorData.errmsg || errorData.error || error.message;
-      
-      console.error(`[Proxy Fatal Error] Status: ${status}, Message: ${errorMsg}`);
-      
-      res.status(status).json({ 
-        error: errorMsg,
-        s: "error",
-        details: errorData 
-      });
     }
+
+    return res.status(400).json({ error: "Invalid request", s: "error" });
   });
 
   // Vite middleware for development
