@@ -296,6 +296,8 @@ const App: React.FC = () => {
           <h2 className="text-4xl font-black text-white mb-4 tracking-tighter">Cash Secured Puts: Yields, Verified</h2>
           <p className="text-slate-500 leading-relaxed text-lg">
             Verify your CSP yield with data and institutional-grade trade math.
+            <br />
+            <span className="text-[10px] opacity-20">Impact-Site-Verification: 2b58e978-3639-4f7d-bb34-1882b41888b5</span>
           </p>
         </div>
 
