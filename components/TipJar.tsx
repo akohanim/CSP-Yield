@@ -2,7 +2,7 @@
 import React from 'react';
 import { Heart, Coffee } from 'lucide-react';
 
-const BMAC_URL = 'https://buymeacoffee.com/arikohanim';
+const BMAC_URL = 'https://buymeacoffee.com/cool_projects_broh';
 
 /**
  * Try to open the in-page BMAC widget overlay.
