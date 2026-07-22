@@ -11,6 +11,7 @@ import { GeminiInsight } from './components/GeminiInsight';
 import { TutorialModal } from './components/TutorialModal';
 import { ManualCalculator } from './components/ManualCalculator';
 import { HelpCircle, Activity, Calculator } from 'lucide-react';
+import { TipButton, TipJar } from './components/TipJar';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'live' | 'manual'>('live');
@@ -262,7 +263,8 @@ const App: React.FC = () => {
             >
               <HelpCircle className="w-4 h-4" />
               <span className="hidden md:inline">Help</span>
-            </button>
+             </button>
+             <TipButton />
             <div className="hidden sm:block h-4 w-[1px] bg-slate-800"></div>
             <div className={`flex items-center space-x-2 sm:space-x-4 bg-slate-950 rounded-xl sm:rounded-2xl px-3 sm:px-5 py-1.5 sm:py-2 border transition-all duration-300 ${pulse ? 'border-indigo-500 shadow-lg shadow-indigo-500/10' : 'border-slate-800'}`}>
               <div className="flex flex-col items-start">
@@ -382,6 +384,8 @@ const App: React.FC = () => {
         ) : (
           <ManualCalculator />
         )}
+
+        <TipJar />
 
         <footer className="pt-12 border-t border-slate-800/50">
           <p className="text-[10px] text-slate-600 leading-relaxed max-w-4xl">
