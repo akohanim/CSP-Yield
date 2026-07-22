@@ -31,6 +31,7 @@ substitutions:
   _REGION: 'us-central1'
   _REPO_NAME: 'csp-yield'
 
-# Fix for the "Failed to trigger build" error
+# Fix for the "Failed to trigger build" error when service_account is set
 options:
   logging: CLOUD_LOGGING_ONLY
+  defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET
