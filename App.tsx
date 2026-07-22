@@ -11,7 +11,7 @@ import { GeminiInsight } from './components/GeminiInsight';
 import { TutorialModal } from './components/TutorialModal';
 import { ManualCalculator } from './components/ManualCalculator';
 import { HelpCircle, Activity, Calculator } from 'lucide-react';
-import { TipButton, TipJar } from './components/TipJar';
+import { BmacWidget, TipButton, TipJar } from './components/TipJar';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'live' | 'manual'>('live');
@@ -244,6 +244,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 pb-80 selection:bg-indigo-500/30">
       {showTutorial && <TutorialModal onClose={handleTutorialClose} />}
+      <BmacWidget />
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 backdrop-blur-xl bg-opacity-90">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-2 sm:space-x-3">

@@ -1,11 +1,80 @@
 
-import React, { useState } from 'react';
-import { Heart, Coffee, ExternalLink } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { Heart, Coffee } from 'lucide-react';
 
-const BMAC_URL = 'https://buymeacoffee.com/arikohanim';
+const BMAC_USERNAME = 'arikohanim';
 
+/**
+ * Loads the official Buy Me a Coffee floating widget.
+ * This renders a persistent ☕ button in the bottom-right corner
+ * that opens an in-site donation overlay — users never leave cspyield.com.
+ */
+export const BmacWidget: React.FC = () => {
+  useEffect(() => {
+    // Avoid loading twice
+    if (document.querySelector('script[data-name="BMC-Widget"]')) return;
+
+    const script = document.createElement('script');
+    script.setAttribute('data-name', 'BMC-Widget');
+    script.setAttribute('data-cfasync', 'false');
+    script.src = 'https://cdnjs.buymeacoffee.com/1.0.0/widget.prod.min.js';
+    script.setAttribute('data-id', BMAC_USERNAME);
+    script.setAttribute('data-description', 'Support CSP PRO on Buy Me a Coffee!');
+    script.setAttribute('data-message', 'If this tool helps you validate trades, consider buying me a coffee ☕');
+    script.setAttribute('data-color', '#6366f1'); // indigo-500 to match the site
+    script.setAttribute('data-position', 'Right');
+    script.setAttribute('data-x_margin', '18');
+    script.setAttribute('data-y_margin', '18');
+    script.async = true;
+
+    document.body.appendChild(script);
+
+    return () => {
+      // Cleanup on unmount
+      const existing = document.querySelector('script[data-name="BMC-Widget"]');
+      if (existing) existing.remove();
+      const widget = document.getElementById('bmc-wbtn');
+      if (widget) widget.remove();
+    };
+  }, []);
+
+  return null; // The widget renders itself via the script
+};
+
+/**
+ * Compact tip button for the header. Clicking it opens the BMAC widget overlay.
+ */
+export const TipButton: React.FC = () => {
+  const handleClick = () => {
+    // The BMAC widget exposes a global click handler on #bmc-wbtn
+    const bmcBtn = document.getElementById('bmc-wbtn') as HTMLElement | null;
+    if (bmcBtn) {
+      bmcBtn.click();
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      className="group flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 text-amber-400/70 hover:text-amber-300 hover:bg-amber-500/10 border border-transparent hover:border-amber-500/20"
+      title="Buy Me a Coffee"
+    >
+      <Heart className="w-3.5 h-3.5 group-hover:text-red-400 group-hover:fill-red-400 transition-colors duration-300" />
+      <span className="hidden lg:inline">Tip</span>
+    </button>
+  );
+};
+
+/**
+ * Inline CTA card above the footer. Clicking opens the in-site BMAC overlay.
+ */
 export const TipJar: React.FC = () => {
-  const [isHovered, setIsHovered] = useState(false);
+  const handleClick = () => {
+    const bmcBtn = document.getElementById('bmc-wbtn') as HTMLElement | null;
+    if (bmcBtn) {
+      bmcBtn.click();
+    }
+  };
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-slate-800/60 bg-gradient-to-br from-slate-900/80 via-slate-900/60 to-amber-950/10 p-6 sm:p-8 backdrop-blur-sm">
@@ -27,42 +96,15 @@ export const TipJar: React.FC = () => {
           </p>
         </div>
 
-        {/* CTA Button */}
-        <a
-          href={BMAC_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          onMouseEnter={() => setIsHovered(true)}
-          onMouseLeave={() => setIsHovered(false)}
-          className="group relative flex items-center gap-3 px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300 border border-amber-500/30 bg-gradient-to-r from-amber-600/20 to-amber-500/10 text-amber-300 hover:from-amber-600 hover:to-amber-500 hover:text-white hover:border-amber-400/60 hover:shadow-lg hover:shadow-amber-500/20 hover:scale-[1.03] active:scale-[0.98]"
+        {/* CTA Button — opens the in-site BMAC overlay */}
+        <button
+          onClick={handleClick}
+          className="group relative flex items-center gap-3 px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300 border border-amber-500/30 bg-gradient-to-r from-amber-600/20 to-amber-500/10 text-amber-300 hover:from-amber-600 hover:to-amber-500 hover:text-white hover:border-amber-400/60 hover:shadow-lg hover:shadow-amber-500/20 hover:scale-[1.03] active:scale-[0.98] cursor-pointer"
         >
-          <span
-            className={`transition-transform duration-500 ${isHovered ? 'animate-bounce' : ''}`}
-          >
-            ☕
-          </span>
+          <span className="group-hover:animate-bounce">☕</span>
           Buy Me a Coffee
-          <ExternalLink className="w-3 h-3 opacity-40 group-hover:opacity-80 transition-opacity" />
-        </a>
+        </button>
       </div>
     </div>
-  );
-};
-
-/**
- * Compact version for the header area.
- */
-export const TipButton: React.FC = () => {
-  return (
-    <a
-      href={BMAC_URL}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="group flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 text-amber-400/70 hover:text-amber-300 hover:bg-amber-500/10 border border-transparent hover:border-amber-500/20"
-      title="Buy Me a Coffee"
-    >
-      <Heart className="w-3.5 h-3.5 group-hover:text-red-400 group-hover:fill-red-400 transition-colors duration-300" />
-      <span className="hidden lg:inline">Tip</span>
-    </a>
   );
 };
